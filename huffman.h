@@ -1,10 +1,14 @@
 #pragma once
 
+#include "utils.h"
+
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 using TString = std::basic_string<char>;
@@ -19,38 +23,49 @@ struct IDecoder {
 
 namespace NDecoder {
 
-static constexpr size_t CHAR_SIZE = 256;
+struct TWriteData {
+    TString OutData{};
+    uint64_t BitBuffer{0};
+    int BitsInBuffer{0};
+};
 
 class THuffDecoder : public IDecoder {
-public:
-    struct TWriteData {
-        TString OutData{};
-        uint64_t BitBuffer{0};
-        int BitsInBuffer{0};
+   public:
+    // Table entry: decoded symbol + number of bits consumed
+    struct TTableEntry {
+        uint8_t Symbol;
+        uint8_t BitsConsumed;  // 0 = incomplete code (need more bits)
     };
 
-    explicit THuffDecoder(const std::span<const uint64_t> charStats);
+    THuffDecoder(const std::span<const uint64_t> charStats, size_t tableBits);
     uint8_t GetNext(TStringView data, size_t& bitPtr) override;
     std::tuple<TString, size_t> Write(TStringView inData) override;
     void BufferedWrite(TStringView inData, TWriteData& writeData);
-private:
+
+   private:
     using TInd = uint16_t;
     static constexpr size_t SZ = CHAR_SIZE * 2 - 1;
     std::array<std::array<uint16_t, 2>, SZ> Tree_{};
 
     std::array<uint64_t, CHAR_SIZE> Codes_{};
     std::array<uint8_t, CHAR_SIZE> Lens_{};
+
+    size_t TableBits_;
+    size_t TableSize_;
+    std::vector<TTableEntry> DecodeTable_{};
 };
 
 class TPredHuffDecoder : public IDecoder {
-public:
-    explicit TPredHuffDecoder(const std::vector<std::vector<uint64_t>>& statTable);
+   public:
+    TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats, size_t tableBits);
     uint8_t GetNext(TStringView data, size_t& bitPtr) override;
     std::tuple<TString, size_t> Write(TStringView inData) override;
-    void Reset() override { LastChar_ = 0; }
-private:
-    std::vector<THuffDecoder> InnerHuffmans_;
-    uint8_t LastChar_{0};
+    void Reset() override { Predicate_ = 0; }
+
+   private:
+    THuffDecoder& GetHuffman(uint32_t predicate);
+    std::array<std::unique_ptr<THuffDecoder>, CHAR_SIZE * CHAR_SIZE> InnerHuffmans_;
+    uint32_t Predicate_{0};
 };
 
-} // namespace NDecoder
+}  // namespace NDecoder
