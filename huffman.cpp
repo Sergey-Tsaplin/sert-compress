@@ -10,11 +10,9 @@
 
 namespace NDecoder {
 
-THuffDecoder::THuffDecoder(const std::span<const uint64_t> charStats, size_t tableBits)
-    : TableBits_(tableBits)
-    , TableSize_(1U << tableBits)
-    , DecodeTable_(TableSize_, {.Symbol = 0, .BitsConsumed = 0})
-{
+template <size_t TABLE_BITS>
+THuffDecoder<TABLE_BITS>::THuffDecoder(const std::span<const uint64_t> charStats) {
+    DecodeTable_.fill({.Symbol = 0, .BitsConsumed = 0});
     using TInd = uint16_t;
     constexpr auto SZ = CHAR_SIZE * 2 - 1;
     std::array<std::pair<TInd, uint8_t>, SZ> parentAndBit;
@@ -30,6 +28,7 @@ THuffDecoder::THuffDecoder(const std::span<const uint64_t> charStats, size_t tab
     // to avoid zero-length codes and degenerate trees
     for (TInd c = 0; c < CHAR_SIZE; c++) {
         q.push(T{.Value = charStats[c] + 1, .Char = c});
+        Tree_[c] = {c, c};
     }
 
     for (TInd c = CHAR_SIZE; c < SZ; c++) {
@@ -44,50 +43,65 @@ THuffDecoder::THuffDecoder(const std::span<const uint64_t> charStats, size_t tab
     }
     assert(q.size() == 1);
 
+    std::vector<size_t> path;
+
     for (size_t c = 0; c < CHAR_SIZE; c++) {
         uint8_t& len = Lens_[c];
         uint64_t& code = Codes_[c];
         len = code = 0;
 
+        path.clear();
         for (size_t cur = c; cur != SZ - 1; cur = parentAndBit[cur].first) {
+            path.push_back(cur);
             len++;
             code = ((code << 1) | parentAndBit[cur].second);
         }
 
-        if (0 < len && len <= TableBits_) {
-            for (uint32_t extra = 0; extra < (1U << (TableBits_ - len)); extra++) {
+        if (0 < len && len <= TABLE_BITS) {
+            for (uint32_t extra = 0; extra < (1U << (TABLE_BITS - len)); extra++) {
                 uint64_t idx = code | (extra << len);
                 DecodeTable_[idx] = {.Symbol = static_cast<uint8_t>(c), .BitsConsumed = len};
             }
         }
+
+        if (len > TABLE_BITS) {
+            auto ch = path[path.size() - TABLE_BITS];
+            DecodeTable_[code & TABLE_MASK] = {.Symbol = static_cast<uint8_t>(ch), .BitsConsumed = 0};
+        }
     }
 }
 
-uint8_t THuffDecoder::GetNext(TStringView data, size_t& bitPtr) {
-    const size_t byteIdx = bitPtr >> 3;
-
-    if (byteIdx + 2 < data.size()) [[likely]] {
-        const uint32_t window = static_cast<uint8_t>(data[byteIdx])
-                                | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 1])) << 8)
-                                | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 2])) << 16);
-        uint32_t bits = (window >> (bitPtr & 7)) & (TableSize_ - 1);
-        const auto& entry = DecodeTable_[bits];
-        if (entry.BitsConsumed > 0) [[likely]] {
-            bitPtr += entry.BitsConsumed;
-            return entry.Symbol;
-        }
-    }
-
-    TInd c = SZ - 1;
+template <size_t TABLE_BITS>
+inline uint8_t THuffDecoder<TABLE_BITS>::GetNextFromTree(TInd c, TStringView data, size_t& bitPtr) {
+    int bit;
     while (c >= CHAR_SIZE) {
-        auto bit = ((static_cast<uint8_t>(data[bitPtr >> 3]) >> (bitPtr & 7)) & 1);
+        bit = ((static_cast<uint8_t>(data[bitPtr >> 3]) >> (bitPtr & 7)) & 1);
         c = Tree_[c][bit];
         bitPtr++;
     }
     return static_cast<uint8_t>(c);
 }
 
-void THuffDecoder::BufferedWrite(TStringView inData, TWriteData& writeData) {
+template <size_t TABLE_BITS>
+uint8_t THuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
+    const size_t byteIdx = bitPtr >> 3;
+
+    const uint32_t window = static_cast<uint8_t>(data[byteIdx])
+                            | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 1])) << 8)
+                            | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 2])) << 16);
+    uint32_t bits = (window >> (bitPtr & 7)) & TABLE_MASK;
+    const auto& entry = DecodeTable_[bits];
+    if (entry.BitsConsumed > 0) [[likely]] {
+        bitPtr += entry.BitsConsumed;
+        return entry.Symbol;
+    } else {
+        bitPtr += TABLE_BITS;
+        return GetNextFromTree(CHAR_SIZE + entry.Symbol, data, bitPtr);
+    }
+}
+
+template <size_t TABLE_BITS>
+void THuffDecoder<TABLE_BITS>::BufferedWrite(TStringView inData, TWriteData& writeData) {
     auto& [outData, bitBuffer, bitsInBuffer] = writeData;
     for (uint8_t c : inData) {
         bitBuffer |= static_cast<uint64_t>(Codes_[c]) << bitsInBuffer;
@@ -101,7 +115,8 @@ void THuffDecoder::BufferedWrite(TStringView inData, TWriteData& writeData) {
     }
 }
 
-std::tuple<TString, size_t> THuffDecoder::Write(TStringView inData) {
+template <size_t TABLE_BITS>
+std::tuple<TString, size_t> THuffDecoder<TABLE_BITS>::Write(TStringView inData) {
     TWriteData writeData;
     writeData.OutData.reserve((inData.size() * 8 + 7) / 8 + 1);
 
@@ -116,13 +131,15 @@ std::tuple<TString, size_t> THuffDecoder::Write(TStringView inData) {
     return {std::move(writeData.OutData), bitSize};
 }
 
-TPredHuffDecoder::TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats, size_t tableBits) {
+template <size_t TABLE_BITS>
+TPredHuffDecoder<TABLE_BITS>::TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats) {
     for (const auto& [pred, stat] : stats) {
-        InnerHuffmans_[pred] = std::make_unique<THuffDecoder>(stat, tableBits);
+        InnerHuffmans_[pred] = std::make_unique<THuffDecoder<TABLE_BITS>>(stat);
     }
 }
 
-THuffDecoder& TPredHuffDecoder::GetHuffman(uint32_t predicate) {
+template <size_t TABLE_BITS>
+THuffDecoder<TABLE_BITS>& TPredHuffDecoder<TABLE_BITS>::GetHuffman(uint32_t predicate) {
     for (const auto and_mask : AND_MASKS) {
         if (auto& huffPtr = InnerHuffmans_[predicate & and_mask]) {
             return *huffPtr;
@@ -131,13 +148,15 @@ THuffDecoder& TPredHuffDecoder::GetHuffman(uint32_t predicate) {
     throw std::runtime_error("Can't find huffman for " + std::to_string(Predicate_));
 }
 
-uint8_t TPredHuffDecoder::GetNext(TStringView data, size_t& bitPtr) {
+template <size_t TABLE_BITS>
+uint8_t TPredHuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
     auto res = GetHuffman(Predicate_).GetNext(data, bitPtr);
     Predicate_ = ((Predicate_ << 8) | static_cast<uint32_t>(res));
     return res;
 }
 
-std::tuple<TString, size_t> TPredHuffDecoder::Write(TStringView inData) {
+template <size_t TABLE_BITS>
+std::tuple<TString, size_t> TPredHuffDecoder<TABLE_BITS>::Write(TStringView inData) {
     TWriteData writeData;
     writeData.OutData.reserve((inData.size() * 8 + 7) / 8 + 1);
 
@@ -155,5 +174,35 @@ std::tuple<TString, size_t> TPredHuffDecoder::Write(TStringView inData) {
 
     return {writeData.OutData, bitSize};
 }
+
+template class THuffDecoder<1>;
+template class THuffDecoder<2>;
+template class THuffDecoder<3>;
+template class THuffDecoder<4>;
+template class THuffDecoder<5>;
+template class THuffDecoder<6>;
+template class THuffDecoder<7>;
+template class THuffDecoder<8>;
+template class THuffDecoder<9>;
+template class THuffDecoder<10>;
+template class THuffDecoder<11>;
+template class THuffDecoder<12>;
+template class THuffDecoder<13>;
+template class THuffDecoder<14>;
+
+template class TPredHuffDecoder<1>;
+template class TPredHuffDecoder<2>;
+template class TPredHuffDecoder<3>;
+template class TPredHuffDecoder<4>;
+template class TPredHuffDecoder<5>;
+template class TPredHuffDecoder<6>;
+template class TPredHuffDecoder<7>;
+template class TPredHuffDecoder<8>;
+template class TPredHuffDecoder<9>;
+template class TPredHuffDecoder<10>;
+template class TPredHuffDecoder<11>;
+template class TPredHuffDecoder<12>;
+template class TPredHuffDecoder<13>;
+template class TPredHuffDecoder<14>;
 
 }  // namespace NDecoder

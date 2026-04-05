@@ -29,7 +29,10 @@ struct TWriteData {
     int BitsInBuffer{0};
 };
 
+template <size_t TABLE_BITS>
 class THuffDecoder : public IDecoder {
+    using TInd = uint16_t;
+
    public:
     // Table entry: decoded symbol + number of bits consumed
     struct TTableEntry {
@@ -37,34 +40,37 @@ class THuffDecoder : public IDecoder {
         uint8_t BitsConsumed;  // 0 = incomplete code (need more bits)
     };
 
-    THuffDecoder(const std::span<const uint64_t> charStats, size_t tableBits);
+    explicit THuffDecoder(const std::span<const uint64_t> charStats);
     uint8_t GetNext(TStringView data, size_t& bitPtr) override;
+    uint8_t GetNextFromTree(TInd c, TStringView data, size_t& bitPtr);
     std::tuple<TString, size_t> Write(TStringView inData) override;
     void BufferedWrite(TStringView inData, TWriteData& writeData);
 
    private:
-    using TInd = uint16_t;
     static constexpr size_t SZ = CHAR_SIZE * 2 - 1;
     std::array<std::array<uint16_t, 2>, SZ> Tree_{};
 
     std::array<uint64_t, CHAR_SIZE> Codes_{};
     std::array<uint8_t, CHAR_SIZE> Lens_{};
 
-    size_t TableBits_;
-    size_t TableSize_;
-    std::vector<TTableEntry> DecodeTable_{};
+    static constexpr size_t TABLE_SIZE = (1UL << TABLE_BITS);
+    static constexpr size_t TABLE_MASK = TABLE_SIZE - 1;
+    std::array<TTableEntry, TABLE_SIZE> DecodeTable_{};
 };
 
+template <size_t TABLE_BITS>
 class TPredHuffDecoder : public IDecoder {
    public:
-    TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats, size_t tableBits);
+    explicit TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats);
     uint8_t GetNext(TStringView data, size_t& bitPtr) override;
     std::tuple<TString, size_t> Write(TStringView inData) override;
-    void Reset() override { Predicate_ = 0; }
+    void Reset() override {
+        Predicate_ = 0;
+    }
 
    private:
-    THuffDecoder& GetHuffman(uint32_t predicate);
-    std::array<std::unique_ptr<THuffDecoder>, CHAR_SIZE * CHAR_SIZE> InnerHuffmans_;
+    THuffDecoder<TABLE_BITS>& GetHuffman(uint32_t predicate);
+    std::array<std::unique_ptr<THuffDecoder<TABLE_BITS>>, CHAR_SIZE * CHAR_SIZE> InnerHuffmans_;
     uint32_t Predicate_{0};
 };
 
