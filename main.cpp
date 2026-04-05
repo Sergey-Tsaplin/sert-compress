@@ -92,12 +92,12 @@ int main(int argc, char** argv) {
     CustomReporter reporter;
 
     auto Reg = [](const std::string& trainName, const std::string& testName) {
-        for (int limit = 16; limit <= 2048; limit *= 2) {
-            RegisterBenchmark<4>(limit, trainName, testName);
-            RegisterBenchmark<6>(limit, trainName, testName);
+        for (int limit = 250; limit <= 260; limit += 5) {
+            // RegisterBenchmark<4>(limit, trainName, testName);
+            // RegisterBenchmark<6>(limit, trainName, testName);
             RegisterBenchmark<8>(limit, trainName, testName);
-            RegisterBenchmark<10>(limit, trainName, testName);
-            RegisterBenchmark<12>(limit, trainName, testName);
+            // RegisterBenchmark<10>(limit, trainName, testName);
+            // RegisterBenchmark<12>(limit, trainName, testName);
         }
     };
     Reg("fast_ru.txt", "haier.txt");

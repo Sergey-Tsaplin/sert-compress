@@ -69,7 +69,7 @@ class TPredHuffDecoder : public IDecoder {
     }
 
    private:
-    THuffDecoder<TABLE_BITS>& GetHuffman(uint32_t predicate);
+    THuffDecoder<TABLE_BITS>& GetHuffman(uint16_t predicate);
     std::array<std::unique_ptr<THuffDecoder<TABLE_BITS>>, CHAR_SIZE * CHAR_SIZE> InnerHuffmans_;
     uint32_t Predicate_{0};
 };

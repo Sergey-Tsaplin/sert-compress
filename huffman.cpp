@@ -139,19 +139,20 @@ TPredHuffDecoder<TABLE_BITS>::TPredHuffDecoder(const std::unordered_map<uint32_t
 }
 
 template <size_t TABLE_BITS>
-THuffDecoder<TABLE_BITS>& TPredHuffDecoder<TABLE_BITS>::GetHuffman(uint32_t predicate) {
-    for (const auto and_mask : AND_MASKS) {
-        if (auto& huffPtr = InnerHuffmans_[predicate & and_mask]) {
-            return *huffPtr;
-        }
+THuffDecoder<TABLE_BITS>& TPredHuffDecoder<TABLE_BITS>::GetHuffman(uint16_t predicate) {
+    if (auto& huffPtr = InnerHuffmans_[predicate]) [[unlikely]] {
+        return *huffPtr;
     }
-    throw std::runtime_error("Can't find huffman for " + std::to_string(Predicate_));
+    if (auto& huffPtr = InnerHuffmans_[predicate & 0xFFu]) [[likely]] {
+        return *huffPtr;
+    }
+    return *InnerHuffmans_[0];
 }
 
 template <size_t TABLE_BITS>
 uint8_t TPredHuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
     auto res = GetHuffman(Predicate_).GetNext(data, bitPtr);
-    Predicate_ = ((Predicate_ << 8) | static_cast<uint32_t>(res));
+    Predicate_ = ((Predicate_ << 8) | static_cast<uint16_t>(res));
     return res;
 }
 
@@ -160,10 +161,10 @@ std::tuple<TString, size_t> TPredHuffDecoder<TABLE_BITS>::Write(TStringView inDa
     TWriteData writeData;
     writeData.OutData.reserve((inData.size() * 8 + 7) / 8 + 1);
 
-    uint32_t predicate = 0;
+    uint16_t predicate = 0;
     for (size_t i = 0; i < inData.length(); i++) {
         GetHuffman(predicate).BufferedWrite(inData.substr(i, 1), writeData);
-        predicate = ((predicate << 8) | static_cast<uint32_t>(static_cast<uint8_t>(inData[i])));
+        predicate = ((predicate << 8) | static_cast<uint16_t>(static_cast<uint8_t>(inData[i])));
     }
 
     size_t bitSize = writeData.OutData.size() * 8 + writeData.BitsInBuffer;
