@@ -344,7 +344,7 @@ TPredStat GetClusteredStat1(std::string_view data, uint8_t count) {
     return result;
 }
 
-TPredStat GetClusteredStat(std::string_view data, uint8_t count) {
+TPredStat GetClusteredStat(std::string_view data, size_t count) {
     // ---- Collect stats ------------------------------------------------
     std::vector<TStat> stats(CHAR_SIZE * CHAR_SIZE);
     for (auto& s : stats) {
@@ -377,6 +377,8 @@ TPredStat GetClusteredStat(std::string_view data, uint8_t count) {
             active.push_back(static_cast<uint16_t>(i));
         }
     }
+
+    std::cout << "Non empty clusters: " << active.size() << " count=" << int(count) << std::endl;
 
     // ---- K-Means++ initialisation -------------------------------------
     const size_t K = count;

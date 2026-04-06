@@ -139,12 +139,7 @@ int main(int argc, char** argv) {
 
     auto Reg = [](const std::string& trainName, const std::string& testName) {
         for (int limit = 230; limit <= 234; limit += 1) {
-            // RegisterBenchmark<4>(limit, trainName, testName);
-            // RegisterBenchmark<6>(limit, trainName, testName);
-            // RegisterBenchmark<7>(limit, trainName, testName);
             RegisterBenchmark<8>(limit, trainName, testName);
-            // RegisterBenchmark<9>(limit, trainName, testName);
-            // RegisterBenchmark<10>(limit, trainName, testName);
         }
     };
     Reg("fast_ru.txt", "haier.txt");

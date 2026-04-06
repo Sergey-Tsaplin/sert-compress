@@ -15,7 +15,7 @@ struct TPredStat {
     std::vector<TStat> ClusterStat;
 };
 
-TPredStat GetClusteredStat(std::string_view data, uint8_t count);
+TPredStat GetClusteredStat(std::string_view data, size_t count);
 
 std::unordered_map<uint32_t, TStat> GetTopPredicates(std::string_view data, std::optional<size_t> limit = {});
 
