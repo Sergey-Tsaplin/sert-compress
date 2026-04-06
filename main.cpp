@@ -87,7 +87,7 @@ static void TestMain(benchmark::State& state, int limit, const std::string& trai
     for (auto _ : state) {
         decoder->Reset();
         size_t inBitPtr = 0;
-        TString restored;
+        std::string restored;
         while (inBitPtr < outBitPtr) {
             restored.push_back(static_cast<char>(decoder->GetNext(coded, inBitPtr)));
         }
@@ -169,7 +169,7 @@ int main1() {
         decoder->Reset();
         Debug(it, __LINE__);
         size_t inBitPtr = 0;
-        TString restored;
+        std::string restored;
         Debug(it, __LINE__);
         while (inBitPtr < outBitPtr) {
             Debug(it, __LINE__, inBitPtr, outBitPtr);

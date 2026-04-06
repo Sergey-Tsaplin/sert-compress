@@ -12,20 +12,17 @@
 #include <unordered_map>
 #include <vector>
 
-using TString = std::basic_string<char>;
-using TStringView = std::basic_string_view<char>;
-
 struct IDecoder {
     virtual ~IDecoder() = default;
-    virtual uint8_t GetNext(TStringView data, size_t& bitPtr) = 0;
-    virtual std::tuple<TString, size_t> Write(TStringView inData) = 0;
+    virtual uint8_t GetNext(std::string_view data, size_t& bitPtr) = 0;
+    virtual std::tuple<std::string, size_t> Write(std::string_view inData) = 0;
     virtual void Reset() {}
 };
 
 namespace NDecoder {
 
 struct TWriteData {
-    TString OutData{};
+    std::string OutData{};
     uint64_t BitBuffer{0};
     int BitsInBuffer{0};
 };
@@ -42,10 +39,10 @@ class THuffDecoder : public IDecoder {
     };
 
     explicit THuffDecoder(const std::span<const uint64_t> charStats);
-    uint8_t GetNext(TStringView data, size_t& bitPtr) override;
-    uint8_t GetNextFromTree(TInd c, TStringView data, size_t& bitPtr);
-    std::tuple<TString, size_t> Write(TStringView inData) override;
-    void BufferedWrite(TStringView inData, TWriteData& writeData);
+    uint8_t GetNext(std::string_view data, size_t& bitPtr) override;
+    uint8_t GetNextFromTree(TInd c, std::string_view data, size_t& bitPtr);
+    std::tuple<std::string, size_t> Write(std::string_view inData) override;
+    void BufferedWrite(std::string_view inData, TWriteData& writeData);
 
    private:
     static constexpr size_t SZ = CHAR_SIZE * 2 - 1;
@@ -62,17 +59,19 @@ class THuffDecoder : public IDecoder {
 template <size_t TABLE_BITS>
 class TPredHuffDecoder : public IDecoder {
     std::array<uint8_t, CHAR_SIZE * CHAR_SIZE> HuffIndex_;
-    std::vector<std::unique_ptr<THuffDecoder<TABLE_BITS>>> InnerHuffmans_;
+    std::vector<THuffDecoder<TABLE_BITS>> InnerHuffmans_;
     uint16_t Predicate_{0};
 
    public:
     explicit TPredHuffDecoder(const NStat::TPredStat& stats);
-    uint8_t GetNext(TStringView data, size_t& bitPtr) override;
-    std::tuple<TString, size_t> Write(TStringView inData) override;
+    uint8_t GetNext(std::string_view data, size_t& bitPtr) override;
+    std::tuple<std::string, size_t> Write(std::string_view inData) override;
     void Reset() override {
         Predicate_ = 0;
     }
-    [[nodiscard]] size_t GetClustersCount() const { return InnerHuffmans_.size(); }
+    [[nodiscard]] size_t GetClustersCount() const {
+        return InnerHuffmans_.size();
+    }
 
    private:
     THuffDecoder<TABLE_BITS>& GetHuffman(uint16_t predicate);

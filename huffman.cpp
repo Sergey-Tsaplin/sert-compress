@@ -72,7 +72,7 @@ THuffDecoder<TABLE_BITS>::THuffDecoder(const std::span<const uint64_t> charStats
 }
 
 template <size_t TABLE_BITS>
-inline uint8_t THuffDecoder<TABLE_BITS>::GetNextFromTree(TInd c, TStringView data, size_t& bitPtr) {
+inline uint8_t THuffDecoder<TABLE_BITS>::GetNextFromTree(TInd c, std::string_view data, size_t& bitPtr) {
     const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
     size_t localBitPtr = bitPtr;
 
@@ -87,7 +87,7 @@ inline uint8_t THuffDecoder<TABLE_BITS>::GetNextFromTree(TInd c, TStringView dat
 }
 
 template <size_t TABLE_BITS>
-uint8_t THuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
+uint8_t THuffDecoder<TABLE_BITS>::GetNext(std::string_view data, size_t& bitPtr) {
     const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
     const size_t byteIdx = bitPtr >> 3;
     const size_t bitOff = bitPtr & 7;
@@ -108,7 +108,7 @@ uint8_t THuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
 }
 
 template <size_t TABLE_BITS>
-void THuffDecoder<TABLE_BITS>::BufferedWrite(TStringView inData, TWriteData& writeData) {
+void THuffDecoder<TABLE_BITS>::BufferedWrite(std::string_view inData, TWriteData& writeData) {
     auto& [outData, bitBuffer, bitsInBuffer] = writeData;
     for (uint8_t c : inData) {
         bitBuffer |= static_cast<uint64_t>(Codes_[c]) << bitsInBuffer;
@@ -123,7 +123,7 @@ void THuffDecoder<TABLE_BITS>::BufferedWrite(TStringView inData, TWriteData& wri
 }
 
 template <size_t TABLE_BITS>
-std::tuple<TString, size_t> THuffDecoder<TABLE_BITS>::Write(TStringView inData) {
+std::tuple<std::string, size_t> THuffDecoder<TABLE_BITS>::Write(std::string_view inData) {
     TWriteData writeData;
     writeData.OutData.reserve((inData.size() * 8 + 7) / 8 + 1);
 
@@ -142,24 +142,24 @@ template <size_t TABLE_BITS>
 TPredHuffDecoder<TABLE_BITS>::TPredHuffDecoder(const NStat::TPredStat& stats) : HuffIndex_(stats.ClusterID) {
     InnerHuffmans_.reserve(stats.ClusterStat.size());
     for (const auto& stat : stats.ClusterStat) {
-        InnerHuffmans_.push_back(std::make_unique<THuffDecoder<TABLE_BITS>>(stat));
+        InnerHuffmans_.emplace_back(stat);
     }
 }
 
 template <size_t TABLE_BITS>
 THuffDecoder<TABLE_BITS>& TPredHuffDecoder<TABLE_BITS>::GetHuffman(uint16_t predicate) {
-    return *InnerHuffmans_[HuffIndex_[predicate]];
+    return InnerHuffmans_[HuffIndex_[predicate]];
 }
 
 template <size_t TABLE_BITS>
-uint8_t TPredHuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
+uint8_t TPredHuffDecoder<TABLE_BITS>::GetNext(std::string_view data, size_t& bitPtr) {
     auto res = GetHuffman(Predicate_).GetNext(data, bitPtr);
     Predicate_ = ((Predicate_ << 8) | static_cast<uint16_t>(res));
     return res;
 }
 
 template <size_t TABLE_BITS>
-std::tuple<TString, size_t> TPredHuffDecoder<TABLE_BITS>::Write(TStringView inData) {
+std::tuple<std::string, size_t> TPredHuffDecoder<TABLE_BITS>::Write(std::string_view inData) {
     TWriteData writeData;
     writeData.OutData.reserve((inData.size() * 8 + 7) / 8 + 1);
 
