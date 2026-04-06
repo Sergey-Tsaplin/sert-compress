@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <functional>
 #include <queue>
-#include <stdexcept>
 
 namespace NDecoder {
 
@@ -28,7 +27,7 @@ THuffDecoder<TABLE_BITS>::THuffDecoder(const std::span<const uint64_t> charStats
     // to avoid zero-length codes and degenerate trees
     for (TInd c = 0; c < CHAR_SIZE; c++) {
         q.push(T{.Value = charStats[c] + 1, .Char = c});
-        Tree_[c] = {c, c};
+        Tree_[c * 2] = Tree_[c * 2 + 1] = c;
     }
 
     for (TInd c = CHAR_SIZE; c < SZ; c++) {
@@ -37,7 +36,8 @@ THuffDecoder<TABLE_BITS>::THuffDecoder(const std::span<const uint64_t> charStats
         auto min2 = q.top();
         q.pop();
         q.push(T{.Value = (min1.Value + min2.Value), .Char = c});
-        Tree_[c] = {min1.Char, min2.Char};
+        Tree_[c * 2] = min1.Char;
+        Tree_[c * 2 + 1] = min2.Char;
         parentAndBit[min1.Char] = {c, 0};
         parentAndBit[min2.Char] = {c, 1};
     }
@@ -73,31 +73,38 @@ THuffDecoder<TABLE_BITS>::THuffDecoder(const std::span<const uint64_t> charStats
 
 template <size_t TABLE_BITS>
 inline uint8_t THuffDecoder<TABLE_BITS>::GetNextFromTree(TInd c, TStringView data, size_t& bitPtr) {
-    int bit;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
+    size_t localBitPtr = bitPtr;
+
     while (c >= CHAR_SIZE) {
-        bit = ((static_cast<uint8_t>(data[bitPtr >> 3]) >> (bitPtr & 7)) & 1);
-        c = Tree_[c][bit];
-        bitPtr++;
+        const uint8_t bit = (bytes[localBitPtr >> 3] >> (localBitPtr & 7)) & 1;
+        c = Tree_[c * 2 + bit];
+        ++localBitPtr;
     }
+
+    bitPtr = localBitPtr;
     return static_cast<uint8_t>(c);
 }
 
 template <size_t TABLE_BITS>
 uint8_t THuffDecoder<TABLE_BITS>::GetNext(TStringView data, size_t& bitPtr) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
     const size_t byteIdx = bitPtr >> 3;
+    const size_t bitOff = bitPtr & 7;
 
-    const uint32_t window = static_cast<uint8_t>(data[byteIdx])
-                            | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 1])) << 8)
-                            | (static_cast<uint32_t>(static_cast<uint8_t>(data[byteIdx + 2])) << 16);
-    uint32_t bits = (window >> (bitPtr & 7)) & TABLE_MASK;
-    const auto& entry = DecodeTable_[bits];
+    uint32_t window;
+    __builtin_memcpy(&window, bytes + byteIdx, sizeof(window));  // single load
+
+    const uint32_t bits = (window >> bitOff) & TABLE_MASK;
+    const TTableEntry entry = DecodeTable_[bits];
+
     if (entry.BitsConsumed > 0) [[likely]] {
         bitPtr += entry.BitsConsumed;
         return entry.Symbol;
-    } else {
-        bitPtr += TABLE_BITS;
-        return GetNextFromTree(CHAR_SIZE + entry.Symbol, data, bitPtr);
     }
+
+    bitPtr += TABLE_BITS;
+    return GetNextFromTree(CHAR_SIZE + entry.Symbol, data, bitPtr);
 }
 
 template <size_t TABLE_BITS>
@@ -132,21 +139,16 @@ std::tuple<TString, size_t> THuffDecoder<TABLE_BITS>::Write(TStringView inData) 
 }
 
 template <size_t TABLE_BITS>
-TPredHuffDecoder<TABLE_BITS>::TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats) {
-    for (const auto& [pred, stat] : stats) {
-        InnerHuffmans_[pred] = std::make_unique<THuffDecoder<TABLE_BITS>>(stat);
+TPredHuffDecoder<TABLE_BITS>::TPredHuffDecoder(const NStat::TPredStat& stats) : HuffIndex_(stats.ClusterID) {
+    InnerHuffmans_.reserve(stats.ClusterStat.size());
+    for (const auto& stat : stats.ClusterStat) {
+        InnerHuffmans_.push_back(std::make_unique<THuffDecoder<TABLE_BITS>>(stat));
     }
 }
 
 template <size_t TABLE_BITS>
 THuffDecoder<TABLE_BITS>& TPredHuffDecoder<TABLE_BITS>::GetHuffman(uint16_t predicate) {
-    if (auto& huffPtr = InnerHuffmans_[predicate]) [[unlikely]] {
-        return *huffPtr;
-    }
-    if (auto& huffPtr = InnerHuffmans_[predicate & 0xFFu]) [[likely]] {
-        return *huffPtr;
-    }
-    return *InnerHuffmans_[0];
+    return *InnerHuffmans_[HuffIndex_[predicate]];
 }
 
 template <size_t TABLE_BITS>
@@ -176,34 +178,34 @@ std::tuple<TString, size_t> TPredHuffDecoder<TABLE_BITS>::Write(TStringView inDa
     return {writeData.OutData, bitSize};
 }
 
-template class THuffDecoder<1>;
-template class THuffDecoder<2>;
-template class THuffDecoder<3>;
-template class THuffDecoder<4>;
-template class THuffDecoder<5>;
-template class THuffDecoder<6>;
-template class THuffDecoder<7>;
+// template class THuffDecoder<1>;
+// template class THuffDecoder<2>;
+// template class THuffDecoder<3>;
+// template class THuffDecoder<4>;
+// template class THuffDecoder<5>;
+// template class THuffDecoder<6>;
+// template class THuffDecoder<7>;
 template class THuffDecoder<8>;
-template class THuffDecoder<9>;
-template class THuffDecoder<10>;
-template class THuffDecoder<11>;
-template class THuffDecoder<12>;
-template class THuffDecoder<13>;
-template class THuffDecoder<14>;
+// template class THuffDecoder<9>;
+// template class THuffDecoder<10>;
+// template class THuffDecoder<11>;
+// template class THuffDecoder<12>;
+// template class THuffDecoder<13>;
+// template class THuffDecoder<14>;
 
-template class TPredHuffDecoder<1>;
-template class TPredHuffDecoder<2>;
-template class TPredHuffDecoder<3>;
-template class TPredHuffDecoder<4>;
-template class TPredHuffDecoder<5>;
-template class TPredHuffDecoder<6>;
-template class TPredHuffDecoder<7>;
+// template class TPredHuffDecoder<1>;
+// template class TPredHuffDecoder<2>;
+// template class TPredHuffDecoder<3>;
+// template class TPredHuffDecoder<4>;
+// template class TPredHuffDecoder<5>;
+// template class TPredHuffDecoder<6>;
+// template class TPredHuffDecoder<7>;
 template class TPredHuffDecoder<8>;
-template class TPredHuffDecoder<9>;
-template class TPredHuffDecoder<10>;
-template class TPredHuffDecoder<11>;
-template class TPredHuffDecoder<12>;
-template class TPredHuffDecoder<13>;
-template class TPredHuffDecoder<14>;
+// template class TPredHuffDecoder<9>;
+// template class TPredHuffDecoder<10>;
+// template class TPredHuffDecoder<11>;
+// template class TPredHuffDecoder<12>;
+// template class TPredHuffDecoder<13>;
+// template class TPredHuffDecoder<14>;
 
 }  // namespace NDecoder

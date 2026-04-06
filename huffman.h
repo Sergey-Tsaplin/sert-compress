@@ -1,5 +1,6 @@
 #pragma once
 
+#include "stat.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -48,7 +49,7 @@ class THuffDecoder : public IDecoder {
 
    private:
     static constexpr size_t SZ = CHAR_SIZE * 2 - 1;
-    std::array<std::array<uint16_t, 2>, SZ> Tree_{};
+    std::array<uint16_t, SZ * 2> Tree_{};
 
     std::array<uint64_t, CHAR_SIZE> Codes_{};
     std::array<uint8_t, CHAR_SIZE> Lens_{};
@@ -60,18 +61,21 @@ class THuffDecoder : public IDecoder {
 
 template <size_t TABLE_BITS>
 class TPredHuffDecoder : public IDecoder {
+    std::array<uint8_t, CHAR_SIZE * CHAR_SIZE> HuffIndex_;
+    std::vector<std::unique_ptr<THuffDecoder<TABLE_BITS>>> InnerHuffmans_;
+    uint16_t Predicate_{0};
+
    public:
-    explicit TPredHuffDecoder(const std::unordered_map<uint32_t, TStat>& stats);
+    explicit TPredHuffDecoder(const NStat::TPredStat& stats);
     uint8_t GetNext(TStringView data, size_t& bitPtr) override;
     std::tuple<TString, size_t> Write(TStringView inData) override;
     void Reset() override {
         Predicate_ = 0;
     }
+    [[nodiscard]] size_t GetClustersCount() const { return InnerHuffmans_.size(); }
 
    private:
     THuffDecoder<TABLE_BITS>& GetHuffman(uint16_t predicate);
-    std::array<std::unique_ptr<THuffDecoder<TABLE_BITS>>, CHAR_SIZE * CHAR_SIZE> InnerHuffmans_;
-    uint32_t Predicate_{0};
 };
 
 }  // namespace NDecoder
